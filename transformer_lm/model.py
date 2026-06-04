@@ -28,10 +28,19 @@ class Linear(nn.Module):
         self, in_features: int, out_features: int, bias: bool = True
     ) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement Linear.__init__()")
+        bound = 1.0 / math.sqrt(in_features)
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
+        self.weight.data.uniform_(-bound, bound)
+        if bias:
+            self.bias = nn.Parameter(torch.zeros(out_features))
+        else:
+            self.bias = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("TODO: Implement Linear.forward()")
+        out = x @ self.weight.T
+        if self.bias is not None:
+            out = out + self.bias
+        return out
 
 
 class Embedding(nn.Module):
@@ -42,10 +51,11 @@ class Embedding(nn.Module):
 
     def __init__(self, num_embeddings: int, embedding_dim: int) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement Embedding.__init__()")
+        self.weight = nn.Parameter(torch.empty(num_embeddings, embedding_dim))
+        self.weight.data.normal_(mean=0.0, std=0.02)
 
     def forward(self, indices: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("TODO: Implement Embedding.forward()")
+        return self.weight[indices]
 
 
 class RMSNorm(nn.Module):
@@ -53,10 +63,12 @@ class RMSNorm(nn.Module):
 
     def __init__(self, d_model: int, eps: float = 1e-5) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement RMSNorm.__init__()")
+        self.d_model = d_model
+        self.eps = eps
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("TODO: Implement RMSNorm.forward()")
+        rms = torch.sqrt(torch.mean(x * x, dim=-1, keepdim=True) + self.eps)
+        return x / rms
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +156,12 @@ def scaled_dot_product_attention(
     Returns:
         ``(B, ..., T, d_v)``
     """
-    raise NotImplementedError("TODO: Implement scaled_dot_product_attention()")
+    d_k = Q.shape[-1]
+    scores = Q @ K.transpose(-2, -1) / math.sqrt(d_k)
+    if mask is not None:
+        scores = scores + mask
+    weights = softmax(scores, dim=-1)
+    return weights @ V
 
 
 class CausalMultiHeadSelfAttention(nn.Module):
@@ -173,7 +190,17 @@ class CausalMultiHeadSelfAttention(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement CausalMultiHeadSelfAttention.__init__()")
+        assert d_model % n_heads == 0
+        d_head = d_model // n_heads
+        assert d_head % 2 == 0
+
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_head = d_head
+        self.qkv_proj = Linear(d_model, 3 * d_model, bias=False)
+        self.o_proj = Linear(d_model, d_model, bias=False)
+        self.rope = RotaryPositionEmbedding(d_head)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -182,7 +209,24 @@ class CausalMultiHeadSelfAttention(nn.Module):
         Returns:
             ``(B, T, d_model)``
         """
-        raise NotImplementedError("TODO: Implement CausalMultiHeadSelfAttention.forward()")
+        B, T, _ = x.shape
+
+        qkv = self.qkv_proj(x)
+        Q, K, V = qkv.split(self.d_model, dim=-1)
+
+        Q = Q.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        K = K.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        V = V.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+
+        Q, K = self.rope(Q, K)
+
+        mask = torch.triu(
+            torch.full((T, T), float("-inf"), device=x.device, dtype=x.dtype),
+            diagonal=1,
+        )
+        attn_out = scaled_dot_product_attention(Q, K, V, mask)
+        attn_out = attn_out.transpose(1, 2).contiguous().view(B, T, self.d_model)
+        return self.dropout(self.o_proj(attn_out))
 
 
 # ---------------------------------------------------------------------------
@@ -210,10 +254,14 @@ class FeedForward(nn.Module):
         self, d_model: int, d_ff: int, dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement FeedForward.__init__()")
+        self.w_gate = Linear(d_model, d_ff, bias=False)
+        self.w_up = Linear(d_model, d_ff, bias=False)
+        self.w_down = Linear(d_ff, d_model, bias=False)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("TODO: Implement FeedForward.forward()")
+        hidden = silu(self.w_gate(x)) * self.w_up(x)
+        return self.dropout(self.w_down(hidden))
 
 
 # ---------------------------------------------------------------------------
@@ -250,10 +298,15 @@ class TransformerBlock(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement TransformerBlock.__init__()")
+        self.ln1 = RMSNorm(d_model)
+        self.ln2 = RMSNorm(d_model)
+        self.attn = CausalMultiHeadSelfAttention(d_model, n_heads, dropout)
+        self.ffn = FeedForward(d_model, d_ff, dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("TODO: Implement TransformerBlock.forward()")
+        x = x + self.attn(self.ln1(x))
+        x = x + self.ffn(self.ln2(x))
+        return x
 
 
 class TransformerLM(nn.Module):
@@ -297,7 +350,21 @@ class TransformerLM(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        raise NotImplementedError("TODO: Implement TransformerLM.__init__()")
+        self.context_length = context_length
+        self.token_emb = Embedding(vocab_size, d_model)
+        self.blocks = nn.ModuleList(
+            [
+                TransformerBlock(d_model, n_heads, d_ff, dropout)
+                for _ in range(n_layers)
+            ]
+        )
+        self.ln_final = RMSNorm(d_model)
+        self.lm_head = Linear(d_model, vocab_size, bias=False)
+        self.lm_head.weight = self.token_emb.weight
+
+        for block in self.blocks:
+            block.attn.o_proj.weight.data.zero_()
+            block.ffn.w_down.weight.data.zero_()
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         """
@@ -306,4 +373,10 @@ class TransformerLM(nn.Module):
         Returns:
             ``(B, T, vocab_size)`` raw logits.
         """
-        raise NotImplementedError("TODO: Implement TransformerLM.forward()")
+        assert input_ids.shape[1] <= self.context_length
+
+        x = self.token_emb(input_ids)
+        for block in self.blocks:
+            x = block(x)
+        x = self.ln_final(x)
+        return self.lm_head(x)

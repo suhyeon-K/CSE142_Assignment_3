@@ -1,0 +1,48 @@
+{
+  "step": [
+    0,
+    100
+  ],
+  "train_loss": [
+    6.249528884887695,
+    5.0762786865234375
+  ],
+  "val_loss": [
+    6.24970058401057,
+    5.082186835152762
+  ],
+  "lr": [
+    0.0,
+    0.0005
+  ],
+  "time": [
+    116.83278894424438,
+    379.49832344055176
+  ],
+  "best_val_loss": 5.082186835152762,
+  "config": {
+    "vocab_size": 512,
+    "context_length": 256,
+    "d_model": 64,
+    "n_layers": 5,
+    "n_heads": 4,
+    "d_ff": 256,
+    "batch_size": 32,
+    "max_steps": 5000,
+    "learning_rate": 0.001,
+    "min_lr": 1e-05,
+    "warmup_steps": 200,
+    "weight_decay": 0.1,
+    "gradient_clipping": true,
+    "gradient_clip_norm": 1.0,
+    "beta1": 0.9,
+    "beta2": 0.95,
+    "dropout": 0.0,
+    "eval_interval": 100,
+    "data_dir": "data",
+    "out_dir": "checkpoints",
+    "device": "cpu",
+    "seed": 42,
+    "resume": false
+  }
+}
